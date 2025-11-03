@@ -332,11 +332,11 @@
 </head>
 <body>
     <div class="container">
-        <h1>🌊 NAVTEX Decoder</h1>
-        <div class="subtitle">Maritime Safety Information Decoder • 518 kHz / 490 kHz</div>
+        <h1> NAVTEX Decoder</h1>
+        <div class="subtitle">Maritime Safety Information Decoder � 518 kHz / 490 kHz</div>
 
         <div class="instructions">
-            <h3>📡 How to Use:</h3>
+            <h3> How to Use:</h3>
             <ul>
                 <li>Connect your NAVTEX receiver's audio output to your computer's line-in or microphone input</li>
                 <li>Alternatively, play NAVTEX audio recordings through your speakers and use your microphone</li>
@@ -344,6 +344,7 @@
                 <li>Adjust the center frequency if needed (default 1530 Hz for standard audio output)</li>
                 <li>The decoder expects BFSK audio with 170 Hz shift at 100 baud</li>
                 <li>Messages start with "ZCZC" and end with "NNNN"</li>
+                <li><strong>Enable "Raw Mode"</strong> to see all decoded characters immediately (useful for testing/tuning) - otherwise only valid messages (ZCZC...NNNN) are shown</li>
             </ul>
         </div>
 
@@ -352,6 +353,10 @@
             <button id="stopBtn" disabled>Stop Decoding</button>
             <button class="btn-secondary" id="clearBtn">Clear Messages</button>
             <button class="btn-secondary" id="exportBtn">Export Messages</button>
+            <label style="background: rgba(255, 255, 255, 0.1); padding: 10px 15px; border-radius: 6px; cursor: pointer;">
+                <input type="checkbox" id="rawModeToggle" style="margin-right: 8px;">
+                Raw Mode (show all decoded text)
+            </label>
             <div class="status">
                 <div class="status-item">
                     <span class="status-label">Status:</span>
@@ -363,7 +368,7 @@
 
         <div class="main-content">
             <div class="panel">
-                <div class="panel-title">📊 Spectrum Waterfall</div>
+                <div class="panel-title"> Spectrum Waterfall</div>
                 <canvas id="waterfall"></canvas>
                 <canvas id="signalMeter"></canvas>
                 <div class="tune-controls">
@@ -376,7 +381,7 @@
             </div>
 
             <div class="panel">
-                <div class="panel-title">📝 Live Decoded Text</div>
+                <div class="panel-title"> Live Decoded Text</div>
                 <div id="decodedText"></div>
                 <div style="margin-top: 10px;">
                     <span id="receivingIndicator" style="display: none;" class="receiving-indicator">RECEIVING MESSAGE</span>
@@ -385,7 +390,7 @@
         </div>
 
         <div class="panel">
-            <div class="panel-title">📨 Message Log</div>
+            <div class="panel-title"> Message Log</div>
             <div class="filter-controls">
                 <label><input type="checkbox" class="subject-filter" value="A" checked> A-Navigational Warnings</label>
                 <label><input type="checkbox" class="subject-filter" value="B" checked> B-Meteorological Warnings</label>
@@ -421,6 +426,7 @@
                 this.currentMessage = '';
                 this.inMessage = false;
                 this.fecBuffer = []; // For Forward Error Correction
+                this.rawMode = false; // Raw mode flag
                 
                 // Signal processing
                 this.samplesPerBit = this.sampleRate / this.baudRate;
@@ -444,6 +450,15 @@
                 document.getElementById('stopBtn').addEventListener('click', () => this.stop());
                 document.getElementById('clearBtn').addEventListener('click', () => this.clearMessages());
                 document.getElementById('exportBtn').addEventListener('click', () => this.exportMessages());
+                
+                document.getElementById('rawModeToggle').addEventListener('change', (e) => {
+                    this.rawMode = e.target.checked;
+                    if (this.rawMode) {
+                        document.getElementById('statusText').textContent = 'Raw Mode - Showing All Text';
+                    } else if (this.audioContext) {
+                        document.getElementById('statusText').textContent = 'Decoding...';
+                    }
+                });
                 
                 document.getElementById('centerFreq').addEventListener('input', (e) => {
                     this.centerFrequency = parseInt(e.target.value);
@@ -543,7 +558,12 @@
                     
                     document.getElementById('startBtn').disabled = true;
                     document.getElementById('stopBtn').disabled = false;
-                    document.getElementById('statusText').textContent = 'Decoding...';
+                    
+                    if (this.rawMode) {
+                        document.getElementById('statusText').textContent = 'Raw Mode - Showing All Text';
+                    } else {
+                        document.getElementById('statusText').textContent = 'Decoding...';
+                    }
                     
                     this.startWaterfallDisplay();
                     
@@ -673,19 +693,40 @@
                 let char = this.simpleMapping[charValue];
                 
                 if (!char) {
-                    // Try alternative mappings or output as hex
-                    char = '';
+                    // Try alternative mappings or output as hex for debugging in raw mode
+                    if (this.rawMode) {
+                        char = `[${charValue.toString(16).toUpperCase().padStart(2, '0')}]`;
+                    } else {
+                        char = '';
+                    }
                 }
                 
                 if (char) {
                     this.currentMessage += char;
-                    this.updateDecodedText(char);
+                    
+                    // In raw mode, always update the display
+                    if (this.rawMode) {
+                        this.updateDecodedText(char);
+                    }
                     
                     // Check for message start
                     if (this.currentMessage.includes('ZCZC')) {
                         this.inMessage = true;
                         document.getElementById('receivingIndicator').style.display = 'inline-block';
                         document.getElementById('signalIndicator').className = 'signal-indicator signal-good';
+                        
+                        // In strict mode (not raw mode), start showing text when we find ZCZC
+                        if (!this.rawMode) {
+                            // Show the message from ZCZC onwards
+                            const zczcIndex = this.currentMessage.lastIndexOf('ZCZC');
+                            const textDiv = document.getElementById('decodedText');
+                            textDiv.textContent = this.currentMessage.substring(zczcIndex);
+                        }
+                    }
+                    
+                    // In strict mode, update text only if we're in a message
+                    if (!this.rawMode && this.inMessage) {
+                        this.updateDecodedText(char);
                     }
                     
                     // Check for message end
@@ -693,6 +734,11 @@
                         this.inMessage = false;
                         document.getElementById('receivingIndicator').style.display = 'none';
                         this.saveMessage(this.currentMessage);
+                        
+                        // In strict mode, clear the display after saving
+                        if (!this.rawMode) {
+                            document.getElementById('decodedText').textContent = '';
+                        }
                         this.currentMessage = '';
                     }
                     
@@ -791,11 +837,11 @@
                 
                 messageDiv.innerHTML = `
                     <div class="message-header">
-                        📡 Station: ${stationName} (${messageObj.station}) | 
+                         Station: ${stationName} (${messageObj.station}) | 
                         Type: ${subjectDesc} (${messageObj.subject}) | 
                         Serial: ${messageObj.serial}
                     </div>
-                    <div class="message-time">🕐 ${time}</div>
+                    <div class="message-time"> ${time}</div>
                     <div class="message-content">${this.escapeHtml(messageObj.content)}</div>
                 `;
                 
